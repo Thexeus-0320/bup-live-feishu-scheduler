@@ -1,0 +1,91 @@
+name: Bilibili Live Loop
+
+on:
+  workflow_dispatch:
+  schedule:
+    # Watchdog only. The main loop re-dispatches itself before the 6h job limit.
+    - cron: "37 */6 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bilibili-live-loop
+  cancel-in-progress: false
+
+jobs:
+  loop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    steps:
+      - name: Run window dispatcher loop
+        env:
+          GH_PAT: ${{ secrets.GH_PAT }}
+          TARGET_REPO: Thexeus-0320/bup-live-feishu-monitor
+          TARGET_WORKFLOW: live-monitor.yml
+          SELF_REPO: Thexeus-0320/bup-live-feishu-scheduler
+          SELF_WORKFLOW: live-loop.yml
+        run: |
+          set -euo pipefail
+
+          api_post() {
+            local url="$1"
+            local data="$2"
+            curl -fsS -X POST \
+              -H "Authorization: Bearer ${GH_PAT}" \
+              -H "Accept: application/vnd.github+json" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "$url" \
+              -d "$data"
+          }
+
+          is_active_window() {
+            local dow hhmm mins
+            dow="$(TZ=Asia/Singapore date +%u)" # 1=Mon ... 7=Sun
+            hhmm="$(TZ=Asia/Singapore date +%H:%M)"
+            mins=$((10#${hhmm%:*} * 60 + 10#${hhmm#*:}))
+
+            # UID 557237: daily 08:30-10:00, 13:00-14:30, 16:00-21:00
+            if (( mins >= 510 && mins < 600 )); then return 0; fi
+            if (( mins >= 780 && mins < 870 )); then return 0; fi
+            if (( mins >= 960 && mins < 1260 )); then return 0; fi
+
+            # UID 525121722: Fri/Sat/Sun 21:00-22:30
+            if [[ "$dow" =~ ^(5|6|7)$ ]] && (( mins >= 1260 && mins < 1350 )); then return 0; fi
+
+            # UID 6509362: Mon-Thu 22:00-23:30
+            if [[ "$dow" =~ ^(1|2|3|4)$ ]] && (( mins >= 1320 && mins < 1410 )); then return 0; fi
+
+            # UID 326246517: Wed/Fri/Sat/Sun 20:00-22:00
+            if [[ "$dow" =~ ^(3|5|6|7)$ ]] && (( mins >= 1200 && mins < 1320 )); then return 0; fi
+
+            return 1
+          }
+
+          dispatch_private_monitor() {
+            api_post \
+              "https://api.github.com/repos/${TARGET_REPO}/actions/workflows/${TARGET_WORKFLOW}/dispatches" \
+              '{"ref":"main"}'
+            echo "Dispatched private monitor at $(TZ=Asia/Singapore date --iso-8601=seconds)"
+          }
+
+          dispatch_next_loop() {
+            api_post \
+              "https://api.github.com/repos/${SELF_REPO}/actions/workflows/${SELF_WORKFLOW}/dispatches" \
+              '{"ref":"main"}'
+            echo "Dispatched next loop at $(TZ=Asia/Singapore date --iso-8601=seconds)"
+          }
+
+          trap dispatch_next_loop EXIT
+
+          for i in $(seq 1 35); do
+            echo "tick=$i local_time=$(TZ=Asia/Singapore date --iso-8601=seconds)"
+            if is_active_window; then
+              dispatch_private_monitor
+            else
+              echo "outside monitor windows"
+            fi
+            if [[ "$i" != "35" ]]; then
+              sleep 600
+            fi
+          done
