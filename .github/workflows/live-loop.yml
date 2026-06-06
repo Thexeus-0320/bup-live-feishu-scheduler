@@ -45,16 +45,13 @@ jobs:
             hhmm="$(TZ=Asia/Singapore date +%H:%M)"
             mins=$((10#${hhmm%:*} * 60 + 10#${hhmm#*:}))
 
-            # UID 557237: daily 08:30-10:00, 13:00-14:30, 16:00-21:00
+            # UIDs 557237 and 6509362: daily 08:30-10:00, 13:00-14:30, 16:00-21:00
             if (( mins >= 510 && mins < 600 )); then return 0; fi
             if (( mins >= 780 && mins < 870 )); then return 0; fi
             if (( mins >= 960 && mins < 1260 )); then return 0; fi
 
             # UID 525121722: Fri/Sat/Sun 21:00-22:30
             if [[ "$dow" =~ ^(5|6|7)$ ]] && (( mins >= 1260 && mins < 1350 )); then return 0; fi
-
-            # UID 6509362: Mon-Thu 22:00-23:30
-            if [[ "$dow" =~ ^(1|2|3|4)$ ]] && (( mins >= 1320 && mins < 1410 )); then return 0; fi
 
             # UID 326246517: Wed/Fri/Sat/Sun 20:00-22:00
             if [[ "$dow" =~ ^(3|5|6|7)$ ]] && (( mins >= 1200 && mins < 1320 )); then return 0; fi
